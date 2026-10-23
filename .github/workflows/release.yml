@@ -1,0 +1,52 @@
+name: Build & release APK
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install SDK components
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Build
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          cp app/build/outputs/apk/release/app-release.apk "GBA-FrameGen-$VER.apk"
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GBA-FrameGen-${{ env.VER }}
+          path: GBA-FrameGen-*.apk
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: GBA FrameGen ${{ env.VER }}
+          files: GBA-FrameGen-*.apk
+          body: |
+            GBA emulator for Android (mGBA core) with Lossless Scaling frame generation.
+
+            **Install:** download the `.apk` below (arm64 Android, Vulkan 1.1+).
+
+            **Frame generation:** import your own `Lossless.dll` (from your Lossless Scaling install on Steam) in the app — it is not distributed here. Optionally import `shaders/shaders_mali.zip` from this repo and pick it under Settings → Shaders.
