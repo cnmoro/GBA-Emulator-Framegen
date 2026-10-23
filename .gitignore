@@ -1,0 +1,10 @@
+.gradle/
+build/
+app/build/
+app/.cxx/
+local.properties
+*.dll
+*.DLL
+*.exe
+*.apk
+shaders_cache/
