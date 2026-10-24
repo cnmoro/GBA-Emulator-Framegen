@@ -14,6 +14,7 @@ void emuUnload();
 // `framegenRunning` tells whether the render loop is up (frames are pushed to it).
 void emuSetVideoScale(int scale);
 void emuSetRenderLoopActive(bool active);
+void emuSetWideWidth(int w);
 
 void emuStart();      // starts/resumes the emulation thread
 void emuPause(bool paused);

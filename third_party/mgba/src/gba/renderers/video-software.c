@@ -43,7 +43,7 @@ static void _updatePalettes(struct GBAVideoSoftwareRenderer* renderer);
 static void _updateFlags(struct GBAVideoSoftwareRenderer* renderer, struct GBAVideoSoftwareBackground* bg);
 
 static void _breakWindow(struct GBAVideoSoftwareRenderer* softwareRenderer, struct WindowN* win, int y);
-static void _breakWindowInner(struct GBAVideoSoftwareRenderer* softwareRenderer, struct WindowN* win);
+static void _breakWindowInner(struct GBAVideoSoftwareRenderer* softwareRenderer, int hStart, int hEnd, struct WindowControl control);
 
 void GBAVideoSoftwareRendererCreate(struct GBAVideoSoftwareRenderer* renderer) {
 	renderer->d.init = GBAVideoSoftwareRendererInit;
@@ -131,6 +131,9 @@ static void GBAVideoSoftwareRendererReset(struct GBAVideoRenderer* renderer) {
 	softwareRenderer->nextY = 0;
 
 	softwareRenderer->objOffsetX = 0;
+	softwareRenderer->wideW = GBA_VIDEO_HORIZONTAL_PIXELS;
+	softwareRenderer->wideL = 0;
+	softwareRenderer->outW = GBA_VIDEO_HORIZONTAL_PIXELS;
 	softwareRenderer->objOffsetY = 0;
 
 	memset(softwareRenderer->scanlineDirty, 0xFFFFFFFF, sizeof(softwareRenderer->scanlineDirty));
@@ -443,40 +446,41 @@ static void _breakWindow(struct GBAVideoSoftwareRenderer* softwareRenderer, stru
 	} else if (y >= win->v.end + win->offsetY && y < win->v.start + win->offsetY) {
 		return;
 	}
-	if (win->h.end > GBA_VIDEO_HORIZONTAL_PIXELS || win->h.end < win->h.start) {
-		struct WindowN splits[2] = { *win, *win };
-		splits[0].h.start = 0;
-		splits[1].h.end = GBA_VIDEO_HORIZONTAL_PIXELS;
-		_breakWindowInner(softwareRenderer, &splits[0]);
-		_breakWindowInner(softwareRenderer, &splits[1]);
+	// window edges are in the normal 240-px picture: shift them into the wide one, and let a window that
+	// reaches either edge of the normal picture reach the edge of the wide one too
+	int L = softwareRenderer->wideL, W = softwareRenderer->wideW;
+	int s = win->h.start, e = win->h.end;
+	if (e > GBA_VIDEO_HORIZONTAL_PIXELS || e < s) {
+		_breakWindowInner(softwareRenderer, 0, e > GBA_VIDEO_HORIZONTAL_PIXELS ? W : e + L, win->control);
+		_breakWindowInner(softwareRenderer, s ? s + L : 0, W, win->control);
 	} else {
-		_breakWindowInner(softwareRenderer, win);
+		_breakWindowInner(softwareRenderer, s ? s + L : 0, e >= GBA_VIDEO_HORIZONTAL_PIXELS ? W : e + L, win->control);
 	}
 }
 
-static void _breakWindowInner(struct GBAVideoSoftwareRenderer* softwareRenderer, struct WindowN* win) {
+static void _breakWindowInner(struct GBAVideoSoftwareRenderer* softwareRenderer, int hStart, int hEnd, struct WindowControl control) {
 	int activeWindow;
 	int startX = 0;
-	if (win->h.end > 0) {
+	if (hEnd > 0) {
 		for (activeWindow = 0; activeWindow < softwareRenderer->nWindows; ++activeWindow) {
-			if (win->h.start < softwareRenderer->windows[activeWindow].endX) {
+			if (hStart < softwareRenderer->windows[activeWindow].endX) {
 				// Insert a window before the end of the active window
 				struct Window oldWindow = softwareRenderer->windows[activeWindow];
-				if (win->h.start > startX) {
+				if (hStart > startX) {
 					// And after the start of the active window
 					int nextWindow = softwareRenderer->nWindows;
 					++softwareRenderer->nWindows;
 					for (; nextWindow > activeWindow; --nextWindow) {
 						softwareRenderer->windows[nextWindow] = softwareRenderer->windows[nextWindow - 1];
 					}
-					softwareRenderer->windows[activeWindow].endX = win->h.start;
+					softwareRenderer->windows[activeWindow].endX = hStart;
 					++activeWindow;
 				}
-				softwareRenderer->windows[activeWindow].control = win->control;
-				softwareRenderer->windows[activeWindow].endX = win->h.end;
-				if (win->h.end >= oldWindow.endX) {
+				softwareRenderer->windows[activeWindow].control = control;
+				softwareRenderer->windows[activeWindow].endX = hEnd;
+				if (hEnd >= oldWindow.endX) {
 					// Trim off extra windows we've overwritten
-					for (++activeWindow; softwareRenderer->nWindows > activeWindow + 1 && win->h.end >= softwareRenderer->windows[activeWindow].endX; ++activeWindow) {
+					for (++activeWindow; softwareRenderer->nWindows > activeWindow + 1 && hEnd >= softwareRenderer->windows[activeWindow].endX; ++activeWindow) {
 						if (VIDEO_CHECKS && activeWindow >= MAX_WINDOW) {
 							mLOG(GBA_VIDEO, FATAL, "Out of bounds window write will occur");
 							return;
@@ -505,9 +509,42 @@ static void _breakWindowInner(struct GBAVideoSoftwareRenderer* softwareRenderer,
 #endif
 }
 
+// picks up the widths for the next frame (host output width and the width the game renders for)
+static void _wideLatch(struct GBAVideoSoftwareRenderer* softwareRenderer) {
+	int outW = softwareRenderer->d.wideMax;
+	if (outW < GBA_VIDEO_HORIZONTAL_PIXELS) {
+		outW = GBA_VIDEO_HORIZONTAL_PIXELS;
+	}
+	if (outW > GBA_VIDEO_WIDE_LIMIT) {
+		outW = GBA_VIDEO_WIDE_LIMIT;
+	}
+	outW &= ~1;
+	int w = softwareRenderer->d.wideReq;
+	if (w < GBA_VIDEO_HORIZONTAL_PIXELS) {
+		w = GBA_VIDEO_HORIZONTAL_PIXELS;
+	}
+	if (w > outW) {
+		w = outW;
+	}
+	w &= ~1;
+	if (w != softwareRenderer->wideW || outW != softwareRenderer->outW) {
+		softwareRenderer->wideW = w;
+		softwareRenderer->wideL = (w - GBA_VIDEO_HORIZONTAL_PIXELS) / 2;
+		softwareRenderer->outW = outW;
+		memset(softwareRenderer->scanlineDirty, 0xFFFFFFFF, sizeof(softwareRenderer->scanlineDirty));
+		int i;
+		for (i = 0; i < 4; ++i) {
+			softwareRenderer->bg[i].yCache = -1;
+		}
+	}
+}
+
 static void GBAVideoSoftwareRendererDrawScanline(struct GBAVideoRenderer* renderer, int y) {
 	struct GBAVideoSoftwareRenderer* softwareRenderer = (struct GBAVideoSoftwareRenderer*) renderer;
 
+	if (y == 0) {
+		_wideLatch(softwareRenderer);
+	}
 	if (y == GBA_VIDEO_VERTICAL_PIXELS - 1) {
 		softwareRenderer->nextY = 0;
 	} else {
@@ -550,16 +587,25 @@ static void GBAVideoSoftwareRendererDrawScanline(struct GBAVideoRenderer* render
 	CLEAN_SCANLINE(softwareRenderer, y);
 
 	color_t* row = &softwareRenderer->outputBuffer[softwareRenderer->outputBufferStride * y];
+	{
+		// the rendered picture is centred in the output one, black bars on the sides
+		int pad = (softwareRenderer->outW - softwareRenderer->wideW) / 2, x;
+		for (x = 0; x < pad; ++x) {
+			row[x] = 0;
+			row[softwareRenderer->outW - 1 - x] = 0;
+		}
+		row += pad;
+	}
 	if (GBARegisterDISPCNTIsForcedBlank(softwareRenderer->dispcnt)) {
 		int x;
-		for (x = 0; x < GBA_VIDEO_HORIZONTAL_PIXELS; ++x) {
+		for (x = 0; x < softwareRenderer->wideW; ++x) {
 			row[x] = M_COLOR_WHITE;
 		}
 		return;
 	}
 
 	GBAVideoSoftwareRendererPreprocessBuffer(softwareRenderer, y);
-	softwareRenderer->spriteCyclesRemaining = GBARegisterDISPCNTIsHblankIntervalFree(softwareRenderer->dispcnt) ? OBJ_HBLANK_FREE_LENGTH : OBJ_LENGTH;
+	softwareRenderer->spriteCyclesRemaining = (GBARegisterDISPCNTIsHblankIntervalFree(softwareRenderer->dispcnt) ? OBJ_HBLANK_FREE_LENGTH : OBJ_LENGTH) * softwareRenderer->wideW / GBA_VIDEO_HORIZONTAL_PIXELS;
 	int spriteLayers = GBAVideoSoftwareRendererPreprocessSpriteLayer(softwareRenderer, y);
 
 	int w;
@@ -678,7 +724,7 @@ static void GBAVideoSoftwareRendererDrawScanline(struct GBAVideoRenderer* render
 
 	int x;
 	if (softwareRenderer->greenswap) {
-		for (x = 0; x < GBA_VIDEO_HORIZONTAL_PIXELS; x += 4) {
+		for (x = 0; x < softwareRenderer->wideW; x += 4) {
 			row[x] = softwareRenderer->row[x] & (M_COLOR_RED | M_COLOR_BLUE);
 			row[x] |= softwareRenderer->row[x + 1] & M_COLOR_GREEN;
 			row[x + 1] = softwareRenderer->row[x + 1] & (M_COLOR_RED | M_COLOR_BLUE);
@@ -691,14 +737,14 @@ static void GBAVideoSoftwareRendererDrawScanline(struct GBAVideoRenderer* render
 		}
 	} else {
 #ifdef COLOR_16_BIT
-		for (x = 0; x < GBA_VIDEO_HORIZONTAL_PIXELS; x += 4) {
+		for (x = 0; x < softwareRenderer->wideW; x += 4) {
 			row[x] = softwareRenderer->row[x];
 			row[x + 1] = softwareRenderer->row[x + 1];
 			row[x + 2] = softwareRenderer->row[x + 2];
 			row[x + 3] = softwareRenderer->row[x + 3];
 		}
 #else
-		memcpy(row, softwareRenderer->row, GBA_VIDEO_HORIZONTAL_PIXELS * sizeof(*row));
+		memcpy(row, softwareRenderer->row, softwareRenderer->wideW * sizeof(*row));
 #endif
 	}
 }
@@ -838,14 +884,14 @@ static void GBAVideoSoftwareRendererWriteBLDCNT(struct GBAVideoSoftwareRenderer*
 
 void GBAVideoSoftwareRendererPreprocessBuffer(struct GBAVideoSoftwareRenderer* softwareRenderer, int y) {
 	int x;
-	for (x = 0; x < GBA_VIDEO_HORIZONTAL_PIXELS; x += 4) {
+	for (x = 0; x < softwareRenderer->wideW; x += 4) {
 		softwareRenderer->spriteLayer[x] = FLAG_UNWRITTEN;
 		softwareRenderer->spriteLayer[x + 1] = FLAG_UNWRITTEN;
 		softwareRenderer->spriteLayer[x + 2] = FLAG_UNWRITTEN;
 		softwareRenderer->spriteLayer[x + 3] = FLAG_UNWRITTEN;
 	}
 
-	softwareRenderer->windows[0].endX = GBA_VIDEO_HORIZONTAL_PIXELS;
+	softwareRenderer->windows[0].endX = softwareRenderer->wideW;
 	softwareRenderer->nWindows = 1;
 	if (GBARegisterDISPCNTIsWin0Enable(softwareRenderer->dispcnt) || GBARegisterDISPCNTIsWin1Enable(softwareRenderer->dispcnt) || GBARegisterDISPCNTIsObjwinEnable(softwareRenderer->dispcnt)) {
 		softwareRenderer->windows[0].control = softwareRenderer->winout;

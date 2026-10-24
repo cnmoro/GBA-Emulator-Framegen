@@ -169,8 +169,8 @@ static inline void _compositeNoBlendNoObjwin(struct GBAVideoSoftwareRenderer* re
 	}
 
 #define BACKGROUND_BITMAP_INIT                                                                                        \
-	int32_t x = background->sx + (renderer->start - 1) * background->dx;                                              \
-	int32_t y = background->sy + (renderer->start - 1) * background->dy;                                              \
+	int32_t x = background->sx + (renderer->start - renderer->wideL - 1) * background->dx;                            \
+	int32_t y = background->sy + (renderer->start - renderer->wideL - 1) * background->dy;                            \
 	int mosaicH = 0;                                                                                                  \
 	int mosaicWait = 0;                                                                                               \
 	int32_t localX;                                                                                                   \
@@ -178,8 +178,9 @@ static inline void _compositeNoBlendNoObjwin(struct GBAVideoSoftwareRenderer* re
 	if (background->mosaic) {                                                                                         \
 		int mosaicV = GBAMosaicControlGetBgV(renderer->mosaic) + 1;                                                   \
 		mosaicH = GBAMosaicControlGetBgH(renderer->mosaic) + 1;                                                       \
-		mosaicWait = (mosaicH - renderer->start + GBA_VIDEO_HORIZONTAL_PIXELS * mosaicH) % mosaicH;                   \
-		int32_t startX = renderer->start - (renderer->start % mosaicH);                                               \
+		int32_t sx0 = renderer->start - renderer->wideL;                                                              \
+		mosaicWait = (mosaicH - sx0 + 512 * mosaicH) % mosaicH;                                                       \
+		int32_t startX = sx0 - (((sx0 % mosaicH) + mosaicH) % mosaicH);                                               \
 		--mosaicH;                                                                                                    \
 		localX = -(inY % mosaicV) * background->dmx;                                                                  \
 		localY = -(inY % mosaicV) * background->dmy;                                                                  \

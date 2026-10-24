@@ -431,7 +431,14 @@ static void _GBACoreDesiredVideoDimensions(const struct mCore* core, unsigned* w
 	int scale = 1;
 #endif
 
-	*width = GBA_VIDEO_HORIZONTAL_PIXELS * scale;
+	int w = GBA_VIDEO_HORIZONTAL_PIXELS;
+#ifndef BUILD_GLES3
+	{
+		const struct GBACore* gbacore = (const struct GBACore*) core;
+		w = gbacore->renderer.outW >= GBA_VIDEO_HORIZONTAL_PIXELS ? gbacore->renderer.outW : GBA_VIDEO_HORIZONTAL_PIXELS;
+	}
+#endif
+	*width = w * scale;
 	*height = GBA_VIDEO_VERTICAL_PIXELS * scale;
 }
 

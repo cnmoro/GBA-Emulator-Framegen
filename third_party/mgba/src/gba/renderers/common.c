@@ -6,6 +6,7 @@
 #include <mgba/internal/gba/renderers/common.h>
 
 #include <mgba/gba/interface.h>
+#include <mgba/internal/gba/video.h>
 
 int GBAVideoRendererCleanOAM(struct GBAObj* oam, struct GBAVideoRendererSprite* sprites, int offsetY) {
 	int i;
@@ -27,7 +28,9 @@ int GBAVideoRendererCleanOAM(struct GBAObj* oam, struct GBAVideoRendererSprite* 
 			if (GBAObjAttributesAGetY(obj.a) >= GBA_VIDEO_VERTICAL_PIXELS && GBAObjAttributesAGetY(obj.a) + height < VIDEO_VERTICAL_TOTAL_PIXELS) {
 				continue;
 			}
-			if (GBAObjAttributesBGetX(obj.b) >= GBA_VIDEO_HORIZONTAL_PIXELS && GBAObjAttributesBGetX(obj.b) + width < 512) {
+			// off screen even in the widest picture (up to (GBA_VIDEO_WIDE_LIMIT - 240) / 2 columns on each side)
+			if (GBAObjAttributesBGetX(obj.b) >= (GBA_VIDEO_HORIZONTAL_PIXELS + GBA_VIDEO_WIDE_LIMIT) / 2 &&
+			    GBAObjAttributesBGetX(obj.b) + width <= 512 - (GBA_VIDEO_WIDE_LIMIT - GBA_VIDEO_HORIZONTAL_PIXELS) / 2) {
 				continue;
 			}
 			int y = GBAObjAttributesAGetY(obj.a) + offsetY;

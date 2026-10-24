@@ -116,6 +116,7 @@ JNIEXPORT jboolean JNICALL FN(loadRom)(JNIEnv *env, jclass, jstring rom, jstring
 
 JNIEXPORT void JNICALL FN(unload)(JNIEnv *, jclass) { gbafg::emuUnload(); }
 JNIEXPORT void JNICALL FN(setVideoScale)(JNIEnv *, jclass, jint s) { gbafg::emuSetVideoScale(s); }
+JNIEXPORT void JNICALL FN(setWideWidth)(JNIEnv *, jclass, jint w) { gbafg::emuSetWideWidth(w); }
 JNIEXPORT void JNICALL FN(start)(JNIEnv *, jclass) { gbafg::emuStart(); }
 JNIEXPORT void JNICALL FN(pause)(JNIEnv *, jclass, jboolean p) { gbafg::emuPause(p == JNI_TRUE); }
 JNIEXPORT void JNICALL FN(setKeys)(JNIEnv *, jclass, jint k) { gbafg::emuSetKeys((uint32_t)k); }

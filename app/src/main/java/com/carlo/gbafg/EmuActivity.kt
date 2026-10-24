@@ -46,6 +46,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback, ControlsView.Listener {
     @Volatile private var fastForward = false
     private var dispScale = 1
     private var internalScale = 1
+    /** width of the picture (240 = GBA; more in widescreen, matching the screen's aspect) */
+    private var picW = 240
     @Volatile private var surfaceReady = false
     private var refreshHz = 60f
     private var menuOpen = false
@@ -163,14 +165,20 @@ class EmuActivity : Activity(), SurfaceHolder.Callback, ControlsView.Listener {
         // generated frames into uneven 2/3-pixel rows: the scenery wobbles while walking.
         internalScale = min(cap, fit)
         dispScale = max(internalScale, (fit / internalScale) * internalScale)
-        val sw = 240 * dispScale
+        // widescreen: as many columns as the screen's aspect allows at the same height (games that don't
+        // support it are shown in the middle, with bars)
+        picW = if (prefs.wideScreen && !portrait) {
+            val byAspect = if (prefs.fillScreen) Math.round(160f * w / availH) else w / dispScale
+            (byAspect.coerceIn(240, 432)) and 1.inv()
+        } else 240
+        val sw = picW * dispScale
         val sh = 160 * dispScale
         // "fill" mode: same exact buffer, stretched to the largest 3:2 rect by the compositor (smooth)
         val vw: Int
         val vh: Int
         if (prefs.fillScreen) {
-            val k = min(w / 240f, availH / 160f)
-            vw = (240 * k).toInt(); vh = (160 * k).toInt()
+            val k = min(w / picW.toFloat(), availH / 160f)
+            vw = (picW * k).toInt(); vh = (160 * k).toInt()
         } else {
             vw = sw; vh = sh
         }
@@ -204,12 +212,13 @@ class EmuActivity : Activity(), SurfaceHolder.Callback, ControlsView.Listener {
             }
             if (gen != gfxGeneration) return@execute // a newer layout is already queued
             Native.setVideoScale(scale)
+            Native.setWideWidth(picW)
             val cache = File(filesDir, "spirv").apply { mkdirs() }.absolutePath
             val wantFg = prefs.frameGen && Native.shadersPresent(cache)
             Native.setForceDxbc(prefs.shaderSrc == 2)
             Native.setFp32Subdir(prefs.fp32Subdir())
             Native.setMaliFixes((prefs.gpuFixes and 1) != 0, (prefs.gpuFixes and 2) != 0)
-            val rc = Native.initRenderLoop(cache, 240 * scale, 160 * scale, mult,
+            val rc = Native.initRenderLoop(cache, picW * scale, 160 * scale, mult,
                 prefs.flowScale, prefs.performanceMode, prefs.fp16, refreshHz.toInt())
             loopRunning = rc >= 0
             framegenActive = rc == 0 && wantFg
@@ -235,7 +244,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback, ControlsView.Listener {
         if (!loopRunning || !surfaceReady) return
         val s = surfaceView.holder.surface
         Native.setForceCpuOutput(prefs.forceCpuOutput)
-        if (s != null && s.isValid) Native.setSurface(s, 240 * dispScale, 160 * dispScale)
+        if (s != null && s.isValid) Native.setSurface(s, picW * dispScale, 160 * dispScale)
     }
 
     // ------------------------------------------------------------------
@@ -434,6 +443,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback, ControlsView.Listener {
             "Max internal scale: ${prefs.maxInternalScale}x",
             "GPU fixes: " + prefs.gpuFixesLabel(),
             "Image size: " + if (prefs.fillScreen) "fill screen (smoothed)" else "integer scale (sharp)",
+            "Widescreen (supported games): " + if (prefs.wideScreen) "on" else "off",
         )
         AlertDialog.Builder(this).setTitle("Frame generation")
             .setItems(items) { _, which ->
@@ -444,8 +454,9 @@ class EmuActivity : Activity(), SurfaceHolder.Callback, ControlsView.Listener {
                     3 -> prefs.maxInternalScale = scales[(scales.indexOf(prefs.maxInternalScale) + 1).mod(scales.size)]
                     4 -> prefs.gpuFixes = (prefs.gpuFixes + 3) % 4
                     5 -> prefs.fillScreen = !prefs.fillScreen
+                    6 -> prefs.wideScreen = !prefs.wideScreen
                 }
-                if (which == 3 || which == 5) relayout() else restartRenderLoop()
+                if (which == 3 || which == 5 || which == 6) relayout() else restartRenderLoop()
                 fgSettings()
             }
             .setNegativeButton("Back to game") { _, _ -> Native.pause(false) }

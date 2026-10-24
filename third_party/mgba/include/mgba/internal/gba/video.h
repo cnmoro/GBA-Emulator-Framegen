@@ -200,7 +200,16 @@ struct GBAVideoRenderer {
 	bool highlightOBJ[128];
 	color_t highlightColor;
 	uint8_t highlightAmount;
+
+	// widescreen: output width the host can show (0/240: none) and the width the game asked for
+	int wideMax;
+	int wideReq;
 };
+
+#define GBA_VIDEO_WIDE_LIMIT 432 // widest picture supported (keeps OAM x / 512-px BG maps unambiguous)
+#define GBA_REG_WIDE_MAGIC 0x110 // reads 0x5744 ('WD') on this emulator
+#define GBA_REG_WIDE_MAX 0x112   // reads the widest picture the host can show (240 = none)
+#define GBA_REG_WIDE_REQ 0x114   // the game writes the width it renders for (240 = normal)
 
 struct GBAVideo {
 	struct GBA* p;

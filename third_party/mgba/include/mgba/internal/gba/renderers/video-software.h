@@ -73,7 +73,7 @@ struct WindowControl {
 #define MAX_WINDOW 5
 
 struct Window {
-	uint8_t endX;
+	uint16_t endX;
 	struct WindowControl control;
 };
 
@@ -87,8 +87,11 @@ struct GBAVideoSoftwareRenderer {
 
 	GBARegisterDISPCNT dispcnt;
 
-	uint32_t row[GBA_VIDEO_HORIZONTAL_PIXELS];
-	uint32_t spriteLayer[GBA_VIDEO_HORIZONTAL_PIXELS];
+	uint32_t row[512];
+	uint32_t spriteLayer[512];
+	int wideW;   // width being rendered (>= 240)
+	int wideL;   // extra columns on the left of the normal picture
+	int outW;    // width of the output picture (the rendered one is centred in it)
 	int32_t spriteCyclesRemaining;
 
 	// BLDCNT

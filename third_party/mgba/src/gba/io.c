@@ -608,6 +608,11 @@ void GBAIOWrite(struct GBA* gba, uint32_t address, uint16_t value) {
 	case REG_DEBUG_ENABLE:
 		gba->debug = value == 0xC0DE;
 		return;
+	case GBA_REG_WIDE_REQ:
+		if (gba->video.renderer) {
+			gba->video.renderer->wideReq = value;
+		}
+		break;
 	case REG_DEBUG_FLAGS:
 		if (gba->debug) {
 			GBADebug(gba, value);
@@ -1052,6 +1057,20 @@ uint16_t GBAIORead(struct GBA* gba, uint32_t address) {
 	default:
 		mLOG(GBA_IO, GAME_ERROR, "Read from unused I/O register: %03X", address);
 		return GBALoadBad(gba->cpu);
+	case GBA_REG_WIDE_MAGIC:
+		return 0x5744;
+	case GBA_REG_WIDE_MAX: {
+		int w = gba->video.renderer ? gba->video.renderer->wideMax : 0;
+		if (w < GBA_VIDEO_HORIZONTAL_PIXELS) {
+			w = GBA_VIDEO_HORIZONTAL_PIXELS;
+		}
+		if (w > GBA_VIDEO_WIDE_LIMIT) {
+			w = GBA_VIDEO_WIDE_LIMIT;
+		}
+		return w & ~1;
+	}
+	case GBA_REG_WIDE_REQ:
+		break;
 	}
 	return gba->memory.io[address >> 1];
 }
@@ -1101,6 +1120,10 @@ void GBAIODeserialize(struct GBA* gba, const struct GBASerializedState* state) {
 	}
 	if (state->versionMagic >= 0x01000006) {
 		GBAIOWrite(gba, REG_EXWAITCNT_HI, gba->memory.io[REG_INTERNAL_EXWAITCNT_HI >> 1]);
+	}
+	LOAD_16(gba->memory.io[GBA_REG_WIDE_REQ >> 1], GBA_REG_WIDE_REQ, state->io);
+	if (gba->video.renderer) {
+		gba->video.renderer->wideReq = gba->memory.io[GBA_REG_WIDE_REQ >> 1];
 	}
 
 	uint32_t when;

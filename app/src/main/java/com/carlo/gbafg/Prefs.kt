@@ -78,6 +78,11 @@ class Prefs(ctx: Context) {
     }
 
     /** stretch the (exactly scaled) picture to fill the screen, smoothed by the compositor */
+    /** widescreen: games that support it show more of the scene to fill the screen's aspect */
+    var wideScreen: Boolean
+        get() = p.getBoolean("wideScreen", true)
+        set(v) = p.edit().putBoolean("wideScreen", v).apply()
+
     var fillScreen: Boolean
         get() = p.getBoolean("fillScreen", false)
         set(v) = p.edit().putBoolean("fillScreen", v).apply()

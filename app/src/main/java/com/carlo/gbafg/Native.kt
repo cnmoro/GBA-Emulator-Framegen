@@ -26,6 +26,8 @@ object Native {
     @JvmStatic external fun loadRom(romPath: String, savePath: String): Boolean
     @JvmStatic external fun unload()
     @JvmStatic external fun setVideoScale(scale: Int)
+    /** widescreen: width (240..432) of the picture games that support it may fill */
+    @JvmStatic external fun setWideWidth(width: Int)
     @JvmStatic external fun start()
     @JvmStatic external fun pause(paused: Boolean)
     @JvmStatic external fun setKeys(keys: Int)

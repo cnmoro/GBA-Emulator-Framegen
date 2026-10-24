@@ -8,6 +8,8 @@ extern "C" {
 #include <mgba/core/core.h>
 #include <mgba/core/log.h>
 #include <mgba/gba/core.h>
+#include <mgba/internal/gba/gba.h>
+#include <mgba/internal/gba/video.h>
 #include <mgba-util/vfs.h>
 }
 
@@ -36,6 +38,8 @@ namespace gbafg {
 namespace {
 
 constexpr int kW = 240, kH = 160;
+// widescreen: games that support it render up to this many columns (the rest is pillarboxed by the core)
+constexpr int kMaxW = 432, kStride = 512;
 constexpr int kAudioRate = 48000;
 // GBA: 16777216 Hz / 280896 cycles per frame = 59.7275 fps
 constexpr int64_t kGbaFrameNs = (int64_t)(1e9 * 280896.0 / 16777216.0);
@@ -53,8 +57,10 @@ struct PoolSlot {
 struct Emu {
     std::mutex coreMu;                 // guards core (runFrame vs save/load state)
     mCore *core = nullptr;
-    std::vector<color_t> video = std::vector<color_t>(256 * 256);
-    std::vector<uint32_t> lastFrame = std::vector<uint32_t>(kW * kH);
+    std::vector<color_t> video = std::vector<color_t>(kStride * 256);
+    std::vector<uint32_t> lastFrame = std::vector<uint32_t>(kMaxW * kH);
+    std::atomic<int> wideW{kW};       // width of the picture handed to the screen (host aspect)
+    int frameW = kW;                  // width of lastFrame
     std::atomic<bool> haveFrame{false};
 
     std::thread thread;
@@ -245,7 +251,7 @@ void freePool() {
 }
 
 bool ensurePool() {
-    const int w = std::max(kW * E.scale, E.padW), h = std::max(kH * E.scale, E.padH);
+    const int w = std::max(E.wideW.load() * E.scale, E.padW), h = std::max(kH * E.scale, E.padH);
     if (E.poolW == w && E.poolH == h) return true;
     freePool();
     AHardwareBuffer_Desc d{};
@@ -266,17 +272,22 @@ bool ensurePool() {
     E.poolW = w;
     E.poolH = h;
     E.rowBuf.assign((size_t)w, 0);
-    LOGI("video pool %dx%d (content %dx%d)", w, h, kW * E.scale, kH * E.scale);
+    LOGI("video pool %dx%d (content %dx%d)", w, h, E.wideW.load() * E.scale, kH * E.scale);
     return true;
 }
 
 void presentFrame() {
     // keep a copy for thumbnails (and notice when nothing changed)
     bool still = E.haveFrame.load();
+    const int fw = E.wideW.load();
+    if (fw != E.frameW) {
+        E.frameW = fw;
+        still = false;
+    }
     for (int y = 0; y < kH; ++y) {
-        const color_t *src = E.video.data() + y * 256;
-        uint32_t *dst = E.lastFrame.data() + y * kW;
-        for (int x = 0; x < kW; ++x) {
+        const color_t *src = E.video.data() + y * kStride;
+        uint32_t *dst = E.lastFrame.data() + y * fw;
+        for (int x = 0; x < fw; ++x) {
             const uint32_t c = (uint32_t)src[x] | 0xFF000000u;
             if (dst[x] != c) {
                 still = false;
@@ -302,17 +313,18 @@ void presentFrame() {
     if (AHardwareBuffer_lock(slot->ahb, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, nullptr, &ptr) != 0 || !ptr) return;
     AHardwareBuffer_Desc d{};
     AHardwareBuffer_describe(slot->ahb, &d);
-    const int sc = E.scale, w = E.poolW, cw = kW * sc, ch = kH * sc;
+    const int sc = E.scale, w = E.poolW, cw = fw * sc, ch = kH * sc;
+    if (cw > w) return; // the pool is being resized for a new width
     uint8_t *base = static_cast<uint8_t *>(ptr);
     const size_t rowBytes = (size_t)d.stride * 4;
     for (int y = 0; y < kH; ++y) {
-        const uint32_t *src = E.lastFrame.data() + y * kW;
+        const uint32_t *src = E.lastFrame.data() + y * fw;
         uint32_t *row = E.rowBuf.data();
-        for (int x = 0; x < kW; ++x) {
+        for (int x = 0; x < fw; ++x) {
             const uint32_t c = src[x];
             for (int k = 0; k < sc; ++k) *row++ = c;
         }
-        for (int x = cw; x < w; ++x) *row++ = src[kW - 1]; // repeat the right edge into the padding
+        for (int x = cw; x < w; ++x) *row++ = src[fw - 1]; // repeat the right edge into the padding
         for (int k = 0; k < sc; ++k)
             std::memcpy(base + (size_t)(y * sc + k) * rowBytes, E.rowBuf.data(), (size_t)w * 4);
     }
@@ -398,7 +410,7 @@ bool emuLoadRom(const std::string &romPath, const std::string &savePath) {
     mCoreConfigSetDefaultValue(&core->config, "idleOptimization", "detect");
     mCoreConfigSetDefaultIntValue(&core->config, "volume", 0x100); // default is 0 = silent
     mCoreLoadConfig(core);
-    core->setVideoBuffer(core, E.video.data(), 256);
+    core->setVideoBuffer(core, E.video.data(), kStride);
     core->setAudioBufferSize(core, 2048);
     blip_set_rates(core->getAudioChannel(core, 0), core->frequency(core), kAudioRate);
     blip_set_rates(core->getAudioChannel(core, 1), core->frequency(core), kAudioRate);
@@ -411,6 +423,7 @@ bool emuLoadRom(const std::string &romPath, const std::string &savePath) {
     VFile *sav = VFileOpen(savePath.c_str(), O_CREAT | O_RDWR);
     if (sav) core->loadSave(core, sav);
     core->reset(core);
+    static_cast<GBA *>(core->board)->video.renderer->wideMax = E.wideW.load();
     E.core = core;
     E.haveFrame = false;
     return true;
@@ -447,6 +460,17 @@ void emuSetPadding(int w, int h) {
 }
 
 void emuSetRenderLoopActive(bool active) { E.loopActive = active; }
+
+void emuSetWideWidth(int w) {
+    w = std::max(kW, std::min(kMaxW, w)) & ~1;
+    {
+        std::lock_guard<std::mutex> lk(E.coreMu);
+        E.wideW = w;
+        if (E.core) static_cast<GBA *>(E.core->board)->video.renderer->wideMax = w;
+    }
+    std::lock_guard<std::mutex> lk(E.poolMu);
+    freePool();
+}
 
 void emuStart() {
     std::lock_guard<std::mutex> lk(E.stateMu);
@@ -533,7 +557,10 @@ void emuReset() {
 
 bool emuCopyLastFrame(uint32_t *dst) {
     if (!E.haveFrame) return false;
-    std::memcpy(dst, E.lastFrame.data(), kW * kH * 4);
+    // thumbnails: the middle 240 columns of a wide picture
+    const int fw = E.frameW, off = (fw - kW) / 2;
+    for (int y = 0; y < kH; ++y)
+        std::memcpy(dst + y * kW, E.lastFrame.data() + y * fw + off, kW * 4);
     return true;
 }
 
