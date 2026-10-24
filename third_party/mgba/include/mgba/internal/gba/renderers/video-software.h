@@ -92,6 +92,7 @@ struct GBAVideoSoftwareRenderer {
 	int wideW;   // width being rendered (>= 240)
 	int wideL;   // extra columns on the left of the normal picture
 	int outW;    // width of the output picture (the rendered one is centred in it)
+	int clipStart, clipEnd; // span saved while a BG is drawn without its side margins
 	int32_t spriteCyclesRemaining;
 
 	// BLDCNT

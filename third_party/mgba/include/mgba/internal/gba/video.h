@@ -204,12 +204,14 @@ struct GBAVideoRenderer {
 	// widescreen: output width the host can show (0/240: none) and the width the game asked for
 	int wideMax;
 	int wideReq;
+	int wideMask; // BGs (bits 0-3) the game keeps out of the side margins
 };
 
 #define GBA_VIDEO_WIDE_LIMIT 432 // widest picture supported (keeps OAM x / 512-px BG maps unambiguous)
 #define GBA_REG_WIDE_MAGIC 0x110 // reads 0x5744 ('WD') on this emulator
 #define GBA_REG_WIDE_MAX 0x112   // reads the widest picture the host can show (240 = none)
 #define GBA_REG_WIDE_REQ 0x114   // the game writes the width it renders for (240 = normal)
+#define GBA_REG_WIDE_MASK 0x116  // BGs (bits 0-3) not drawn in the side margins (e.g. a 256-px text layer)
 
 struct GBAVideo {
 	struct GBA* p;

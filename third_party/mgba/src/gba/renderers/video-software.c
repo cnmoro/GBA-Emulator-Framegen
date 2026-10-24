@@ -450,6 +450,9 @@ static void _breakWindow(struct GBAVideoSoftwareRenderer* softwareRenderer, stru
 	// reaches either edge of the normal picture reach the edge of the wide one too
 	int L = softwareRenderer->wideL, W = softwareRenderer->wideW;
 	int s = win->h.start, e = win->h.end;
+	if (s == e || s >= GBA_VIDEO_HORIZONTAL_PIXELS) {
+		return;
+	}
 	if (e > GBA_VIDEO_HORIZONTAL_PIXELS || e < s) {
 		_breakWindowInner(softwareRenderer, 0, e > GBA_VIDEO_HORIZONTAL_PIXELS ? W : e + L, win->control);
 		_breakWindowInner(softwareRenderer, s ? s + L : 0, W, win->control);
@@ -507,6 +510,33 @@ static void _breakWindowInner(struct GBAVideoSoftwareRenderer* softwareRenderer,
 		mLOG(GBA_VIDEO, FATAL, "Out of bounds window write occurred!");
 	}
 #endif
+}
+
+// a BG the game keeps out of the side margins is drawn over the normal 240 columns only
+static bool _wideClip(struct GBAVideoSoftwareRenderer* softwareRenderer, int bg) {
+	softwareRenderer->clipStart = softwareRenderer->start;
+	softwareRenderer->clipEnd = softwareRenderer->end;
+	if (!softwareRenderer->wideL || !(softwareRenderer->d.wideMask & (1 << bg))) {
+		return true;
+	}
+	int lo = softwareRenderer->wideL, hi = lo + GBA_VIDEO_HORIZONTAL_PIXELS;
+	if (softwareRenderer->start < lo) {
+		softwareRenderer->start = lo;
+	}
+	if (softwareRenderer->end > hi) {
+		softwareRenderer->end = hi;
+	}
+	if (softwareRenderer->start >= softwareRenderer->end) {
+		softwareRenderer->start = softwareRenderer->clipStart;
+		softwareRenderer->end = softwareRenderer->clipEnd;
+		return false;
+	}
+	return true;
+}
+
+static void _wideUnclip(struct GBAVideoSoftwareRenderer* softwareRenderer) {
+	softwareRenderer->start = softwareRenderer->clipStart;
+	softwareRenderer->end = softwareRenderer->clipEnd;
 }
 
 // picks up the widths for the next frame (host output width and the width the game renders for)
@@ -653,13 +683,15 @@ static void GBAVideoSoftwareRendererDrawScanline(struct GBAVideoRenderer* render
 			if (spriteLayers & (1 << priority)) {
 				GBAVideoSoftwareRendererPostprocessSprite(softwareRenderer, priority);
 			}
-			if (TEST_LAYER_ENABLED(0) && GBARegisterDISPCNTGetMode(softwareRenderer->dispcnt) < 2) {
+			if (TEST_LAYER_ENABLED(0) && GBARegisterDISPCNTGetMode(softwareRenderer->dispcnt) < 2 && _wideClip(softwareRenderer, 0)) {
 				GBAVideoSoftwareRendererDrawBackgroundMode0(softwareRenderer, &softwareRenderer->bg[0], y);
+				_wideUnclip(softwareRenderer);
 			}
-			if (TEST_LAYER_ENABLED(1) && GBARegisterDISPCNTGetMode(softwareRenderer->dispcnt) < 2) {
+			if (TEST_LAYER_ENABLED(1) && GBARegisterDISPCNTGetMode(softwareRenderer->dispcnt) < 2 && _wideClip(softwareRenderer, 1)) {
 				GBAVideoSoftwareRendererDrawBackgroundMode0(softwareRenderer, &softwareRenderer->bg[1], y);
+				_wideUnclip(softwareRenderer);
 			}
-			if (TEST_LAYER_ENABLED(2)) {
+			if (TEST_LAYER_ENABLED(2) && _wideClip(softwareRenderer, 2)) {
 				switch (GBARegisterDISPCNTGetMode(softwareRenderer->dispcnt)) {
 				case 0:
 					GBAVideoSoftwareRendererDrawBackgroundMode0(softwareRenderer, &softwareRenderer->bg[2], y);
@@ -678,8 +710,9 @@ static void GBAVideoSoftwareRendererDrawScanline(struct GBAVideoRenderer* render
 					GBAVideoSoftwareRendererDrawBackgroundMode5(softwareRenderer, &softwareRenderer->bg[2], y);
 					break;
 				}
+				_wideUnclip(softwareRenderer);
 			}
-			if (TEST_LAYER_ENABLED(3)) {
+			if (TEST_LAYER_ENABLED(3) && _wideClip(softwareRenderer, 3)) {
 				switch (GBARegisterDISPCNTGetMode(softwareRenderer->dispcnt)) {
 				case 0:
 					GBAVideoSoftwareRendererDrawBackgroundMode0(softwareRenderer, &softwareRenderer->bg[3], y);
@@ -688,6 +721,7 @@ static void GBAVideoSoftwareRendererDrawScanline(struct GBAVideoRenderer* render
 					GBAVideoSoftwareRendererDrawBackgroundMode2(softwareRenderer, &softwareRenderer->bg[3], y);
 					break;
 				}
+				_wideUnclip(softwareRenderer);
 			}
 		}
 	}

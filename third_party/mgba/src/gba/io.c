@@ -613,6 +613,11 @@ void GBAIOWrite(struct GBA* gba, uint32_t address, uint16_t value) {
 			gba->video.renderer->wideReq = value;
 		}
 		break;
+	case GBA_REG_WIDE_MASK:
+		if (gba->video.renderer) {
+			gba->video.renderer->wideMask = value;
+		}
+		break;
 	case REG_DEBUG_FLAGS:
 		if (gba->debug) {
 			GBADebug(gba, value);
@@ -1070,6 +1075,7 @@ uint16_t GBAIORead(struct GBA* gba, uint32_t address) {
 		return w & ~1;
 	}
 	case GBA_REG_WIDE_REQ:
+	case GBA_REG_WIDE_MASK:
 		break;
 	}
 	return gba->memory.io[address >> 1];
@@ -1085,6 +1091,9 @@ void GBAIOSerialize(struct GBA* gba, struct GBASerializedState* state) {
 			STORE_16(reg, i, state->io);
 		}
 	}
+	// widescreen: the width the game asked for travels with the state
+	STORE_16(gba->memory.io[GBA_REG_WIDE_REQ >> 1], GBA_REG_WIDE_REQ, state->io);
+	STORE_16(gba->memory.io[GBA_REG_WIDE_MASK >> 1], GBA_REG_WIDE_MASK, state->io);
 
 	for (i = 0; i < 4; ++i) {
 		STORE_16(gba->memory.io[(REG_DMA0CNT_LO + i * 12) >> 1], (REG_DMA0CNT_LO + i * 12), state->io);
@@ -1122,8 +1131,10 @@ void GBAIODeserialize(struct GBA* gba, const struct GBASerializedState* state) {
 		GBAIOWrite(gba, REG_EXWAITCNT_HI, gba->memory.io[REG_INTERNAL_EXWAITCNT_HI >> 1]);
 	}
 	LOAD_16(gba->memory.io[GBA_REG_WIDE_REQ >> 1], GBA_REG_WIDE_REQ, state->io);
+	LOAD_16(gba->memory.io[GBA_REG_WIDE_MASK >> 1], GBA_REG_WIDE_MASK, state->io);
 	if (gba->video.renderer) {
 		gba->video.renderer->wideReq = gba->memory.io[GBA_REG_WIDE_REQ >> 1];
+		gba->video.renderer->wideMask = gba->memory.io[GBA_REG_WIDE_MASK >> 1];
 	}
 
 	uint32_t when;
